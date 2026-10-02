@@ -7,7 +7,7 @@
 > * **Keine Unterstützung:** Issues und Pull Requests werden nicht bearbeitet, Feature-Wünsche nicht umgesetzt. Bitte keine Issues eröffnen.
 > * **Keine Garantie:** Bereitstellung „wie besehen“, ohne jede Gewährleistung und Haftung. Nutzung auf eigenes Risiko.
 > * **Eigene Umgebung:** Entwickelt und getestet nur auf meinen eigenen Ubuntu-Rechnern (24.04 / 26.04, GNOME 46–50). Auf anderen Systemen kann es fehlschlagen.
-> * **Rechte & Eingriff:** Die Extension läuft mit den Rechten deiner GNOME-Sitzung. Sie liest Sperren (Inhibitoren) von systemd-logind und GNOME-Sitzungsverwaltung sowie das Systemjournal, und der Knopf „Wach halten“ legt eine eigene Schlafsperre an. **Lies den Code, bevor du ihn installierst.**
+> * **Rechte & Eingriff:** Die Extension läuft mit den Rechten deiner GNOME-Sitzung. Sie liest Sperren (Inhibitoren) von systemd-logind und der GNOME-Sitzungsverwaltung, das Systemjournal (`journalctl`) und Aufweck-Zähler unter `/sys/class/wakeup`, schreibt ein lokales Protokoll nach `~/.local/state/wakebar/`, und der Knopf „Wach halten“ legt eine eigene Schlafsperre an. Für die Update-Prüfung ruft sie regelmäßig die `metadata.json` von GitHub ab. **Lies den Code, bevor du ihn installierst.**
 > * **Keine Updates zugesichert:** Es kann jederzeit ohne Ankündigung Änderungen, Brüche oder die Löschung des Repos geben. Gern selbst forken und anpassen.
 >
 > *Private hobby project, unmaintained, provided as-is. No support, no issues, no warranty. Fork it if you like.*
@@ -20,37 +20,36 @@
 
 | Plattform | Status | Verzeichnis | Tech Stack |
 | :--- | :--- | :--- | :--- |
-| **Linux (GNOME Shell)** | Konzeptphase, noch nicht lauffähig | `linux/` | GNOME Shell 46–50 ESM, GTK4/Adw, D-Bus (logind, SessionManager), systemd-Journal |
+| **Linux (GNOME Shell)** | v1.0 | [`linux/`](linux/) | GNOME Shell 46–50 ESM, GTK4/Adw, D-Bus (logind, SessionManager), systemd-Journal, libsoup 3 |
 
 ---
 
-## Funktionen (geplant)
+## Funktionen
 
 * **Ampel in der Statusleiste:**
   * **Grün** – der Rechner kann schlafen.
-  * **Gelb** – etwas „grübelt“: kurzzeitige oder nur verzögernde Sperren.
-  * **Rot** – etwas hält ihn fest: aktive Schlaf- oder Leerlaufsperre.
+  * **Gelb** – etwas „grübelt“: nur der automatische Schlaf bzw. die Bildschirm-Abschaltung wird gebremst (z. B. Ton- oder Videowiedergabe im Browser).
+  * **Rot** – etwas hält ihn fest: eine blockierende Schlafsperre.
   * **Blau** – „Wach halten“ ist eingeschaltet.
-  * Dazu eine Zahl mit der Anzahl der aktiven Sperren.
+  * Dazu eine Zahl mit der Anzahl der aktiven Sperren. Position links, in der Mitte oder rechts.
 
-* **Aktuell wach gehalten (Popup):** Eine Karte je Sperre: Programm, Art (Schlaf, Leerlauf, Herunterfahren, …), Modus (blockieren / verzögern), angegebener Grund, Benutzer und Dauer.
+* **Popup (bei Klick auf die Ampel):**
+  * **Kopf-Kachel:** Rechnername, Gesamtstatus, letzte Prüfung, letzter Aufwecker.
+  * **Hält gerade wach:** eine Zeile je Programm mit Status `{blockiert}` / `{bremst}`. Die Sperren stammen von systemd-logind und der GNOME-Sitzung (Browser, Videoplayer, …). Rein systeminterne Sperren, die nur kurz verzögern, sind separat gelistet und färben die Ampel nicht.
+  * **Hielt vom Schlafen ab:** Protokoll früherer Sperren mit Beginn, Ende und Dauer.
+  * **Aufwecker:** Protokoll der Aufwachvorgänge mit Zeitpunkt, Schlafdauer und – soweit der Kernel Zähler dafür liefert – der Ursache (z. B. Netzschalter, Deckel).
+  * **Flyover-Sidecar:** Fährt man über eine Zeile, erscheint neben dem Menü ein Detailfenster mit Erklärung, warum das Programm den Rechner wach hält, dem Grund laut Programm, Prozess, Laufzeit und der Bedeutung des Modus.
+  * **Wach halten:** schaltet eine eigene Schlafsperre ein und aus.
 
-* **Vergangenheit – was am Schlafen gehindert hat:** Protokoll früherer Sperren und gescheiterter Schlafversuche.
+* **Aufbewahrung einstellbar:** „seit letztem Aufwachen“ oder 1, 3, 7, 14 Tage (mit fester Obergrenze). Das Protokoll liegt lokal unter `~/.local/state/wakebar/`.
 
-* **Letzter Aufwecker:** Protokoll der Aufwachvorgänge mit der ermittelten Ursache (z. B. Gerät, Zeitgeber, Tastatur/Netzwerk), soweit der Kern sie meldet.
+* **Updates:** Im Reiter *Updates* der Einstellungen wird die Version mit der `metadata.json` auf GitHub verglichen. Bei einer neuen Version zeigt das Menü einen Hinweis, **Jetzt aktualisieren** startet den Installer im Terminal.
 
-* **Aufbewahrungsdauer einstellbar:** von „bis zum letzten Aufwachen“ über mehrere Tage bis zu einer festen Obergrenze.
-
-* **Wach halten:** Ein Knopf im Popup schaltet eine eigene Schlafsperre ein und aus.
-
-* **Aussehen:** Wie die Schwester-Extensions (snmpbar, monbar) – Karten im Libadwaita-Stil, monochrome Symbol-Icons, helles und dunkles Design.
+* **Aussehen:** Wie die Schwester-Extensions (snmpbar, monbar) – Kacheln im Libadwaita-Stil, monochrome Symbol-Icons, helles und dunkles Design.
 
 ---
 
 ## Installation Linux (Ubuntu / GNOME)
-
-> [!NOTE]
-> Noch nicht lauffähig – die Befehle zeigen das geplante Vorgehen, analog zu monbar.
 
 **Voraussetzungen:** Ubuntu 24.04 – 26.04 (GNOME 46–50), `curl`, `tar` und `glib-compile-schemas` (Paket `libglib2.0-bin`, auf Ubuntu vorinstalliert). Kein `sudo` nötig – alles läuft im eigenen Benutzerkonto.
 
@@ -65,13 +64,15 @@ curl -fsSL https://raw.githubusercontent.com/joeMJ/wakebar/main/install.sh | bas
 
 ### Aktualisieren
 
-Denselben Befehl erneut ausführen oder in den Einstellungen unter *Updates* auf **Jetzt aktualisieren** klicken.
+Denselben Befehl erneut ausführen oder in den Einstellungen unter *Updates* auf **Jetzt aktualisieren** klicken – Einstellungen und Protokoll bleiben erhalten. Liegt eine neue Version vor, zeigt das Popup einen Hinweis.
 
 ### Deinstallieren
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/joeMJ/wakebar/main/install.sh | bash -s -- --uninstall
 ```
+
+Entfernt die Extension, alle Einstellungen und das lokale Protokoll.
 
 ### Erst ansehen, dann ausführen
 
