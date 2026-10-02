@@ -17,5 +17,10 @@
       <default>[]</default>
       <summary>Programme, die die Ampel nicht beeinflussen</summary>
     </key>
+    <key name="update-check-enabled" type="b">
+      <default>true</default>
+      <summary>Automatische Versionsprüfung</summary>
+      <description>Ruft regelmäßig die metadata.json auf GitHub ab und zeigt im Menü einen Hinweis bei neuer Version.</description>
+    </key>
   </schema>
 </schemalist>

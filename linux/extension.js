@@ -12,10 +12,12 @@ import {listInhibitors, classify, isRelevant} from './inhibitors.js';
 import {readWakeCounts, diffWakeCounts, readSleepCycles, ResumeDetector} from './wakelog.js';
 import {loadStore, saveStore, prune} from './store.js';
 import {explain, processInfo, findPid} from './explain.js';
+import {UpdateChecker} from './updater.js';
 
 const LOGIND = ['org.freedesktop.login1', '/org/freedesktop/login1', 'org.freedesktop.login1.Manager'];
 const OWN_WHO = 'wakebar';
 const SAVE_EVERY_SEC = 60;
+const UPDATE_CHECK_SEC = 6 * 3600;
 const BAR_ROWS = 4;        // Zeilen je Protokoll-Kachel; der Rest liegt im Sidecar
 const SIDECAR_ROWS = 30;
 
@@ -52,7 +54,14 @@ export default class WakeBarExtension extends Extension {
             this._interfaceSettings = null;
         }
 
+        this._updateChecker = new UpdateChecker(this.metadata.version || 1);
+        this._updateInfo = null;
         this._buildPanel();
+        this._checkUpdate();
+        this._updateTimer = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, UPDATE_CHECK_SEC, () => {
+            this._checkUpdate();
+            return GLib.SOURCE_CONTINUE;
+        });
         this._importJournal().catch(e => console.error(`wakebar: Journal-Import fehlgeschlagen: ${e.message}`));
         this._refresh();
         this._timer = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, this._settings.get_uint('refresh-interval'), () => {
@@ -66,8 +75,14 @@ export default class WakeBarExtension extends Extension {
             GLib.source_remove(this._timer);
             this._timer = null;
         }
+        if (this._updateTimer) {
+            GLib.source_remove(this._updateTimer);
+            this._updateTimer = null;
+        }
         this._cancellable?.cancel();
         this._cancellable = null;
+        this._updateChecker?.destroy();
+        this._updateChecker = null;
         this._stopKeepAwake();
         this._hideSidecar(true);
         this._hoverSidecar?.destroy();
@@ -104,6 +119,18 @@ export default class WakeBarExtension extends Extension {
     }
 
     // ---- Datenerfassung -------------------------------------------------
+
+    async _checkUpdate() {
+        if (!this._settings?.get_boolean('update-check-enabled')) {
+            this._updateInfo = null;
+            return;
+        }
+        const info = await this._updateChecker?.checkForUpdates(this._cancellable);
+        if (!this._button || !info)
+            return;
+        this._updateInfo = info;
+        this._rebuildMenu(false);
+    }
 
     async _refresh() {
         let list;
@@ -265,7 +292,7 @@ export default class WakeBarExtension extends Extension {
         if (!this._button || !this._store)
             return;
         const real = this._inhibitors.filter(i => i.who !== OWN_WHO);
-        const signature = JSON.stringify([real, this._store.blockers.length, this._store.wakes.at(-1), this._keepFd !== null, this._isDark()]);
+        const signature = JSON.stringify([real, this._store.blockers.length, this._store.wakes.at(-1), this._keepFd !== null, this._isDark(), this._updateInfo?.remoteVersion ?? 0]);
         if (!force && signature === this._signature)
             return;
         this._signature = signature;
@@ -273,6 +300,15 @@ export default class WakeBarExtension extends Extension {
         const menu = this._button.menu;
         menu.removeAll();
         const pal = this._pal();
+
+        // Hinweis auf neue Version (nur wenn die Prüfung eine gefunden hat); Klick öffnet den Reiter „Updates“
+        if (this._updateInfo?.updateAvailable) {
+            const banner = new PopupMenu.PopupImageMenuItem(
+                `Update v${this._updateInfo.remoteVersionName} verfügbar!`, 'software-update-available-symbolic');
+            banner.connect('activate', () => this.openPreferences());
+            menu.addMenuItem(banner);
+            menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+        }
 
         // Zone 1: Kopf-Kachel
         const wakes = this._store.wakes;
@@ -373,9 +409,6 @@ export default class WakeBarExtension extends Extension {
             keepOn ? 'Schlaf wieder erlauben' : 'Wach halten', keepOn ? 'view-conceal-symbolic' : 'view-reveal-symbolic');
         keepItem.connect('activate', () => keepOn ? this._stopKeepAwake() : this._startKeepAwake());
         menu.addMenuItem(keepItem);
-        const refreshItem = new PopupMenu.PopupImageMenuItem('Jetzt aktualisieren', 'view-refresh-symbolic');
-        refreshItem.connect('activate', () => this._refresh());
-        menu.addMenuItem(refreshItem);
         const prefsItem = new PopupMenu.PopupImageMenuItem('Einstellungen...', 'preferences-system-symbolic');
         prefsItem.connect('activate', () => this.openPreferences());
         menu.addMenuItem(prefsItem);
