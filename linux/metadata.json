@@ -3,6 +3,7 @@
   "description": "Zeigt, was den Rechner wach hält, was ihn am Schlafen gehindert und was ihn zuletzt aufgeweckt hat – mit Ampel und Wach-halten-Knopf",
   "uuid": "wakebar@johnlose.de",
   "shell-version": ["46", "47", "48", "49", "50"],
+  "session-modes": ["user", "unlock-dialog"],
   "version": 2,
   "version-name": "1.1",
   "url": "https://github.com/joeMJ/wakebar",

@@ -113,8 +113,11 @@ export default class WakeBarExtension extends Extension {
             this._interfaceSettings.disconnect(this._schemeId);
         this._schemeId = null;
         this._interfaceSettings = null;
-        if (this._store)
+        if (this._store) {
+            // Zählerstand beim Deaktivieren sichern (Shell-Neustart o. Ä.): beim nächsten Aktivieren dem Aufwecker zuordnen
+            this._store.snapshot = {t: Math.floor(Date.now() / 1000), counts: [...(this._preSleep?.counts ?? this._wakeCounts ?? [])], btn: this._preSleep?.btn ?? this._pwrBtn};
             saveStore(this._store);
+        }
         this._button?.destroy();
         this._button = null;
         this._store = null;
@@ -307,8 +310,35 @@ export default class WakeBarExtension extends Extension {
             this._addWake({slept: c.slept, woke: c.woke, source: null});
         this._store.journalSync = now;
         saveStore(this._store);
+        this._applySnapshot();
         await this._backfillCauses();
         this._render();
+    }
+
+    // Wurde die Extension während eines Schlafs deaktiviert (z. B. Shell-Neustart), liegt der Zählerstand von vorher
+    // im Speicher: genau ein Aufwecker seither → Zähler-Diff diesem zuordnen (mehrere → mehrdeutig, nicht zuordnen)
+    _applySnapshot() {
+        const snap = this._store.snapshot;
+        this._store.snapshot = null;
+        if (!snap?.counts?.length)
+            return;
+        const cands = this._store.wakes.filter(w => w.woke >= snap.t - 2 && !w.evidence);
+        if (cands.length !== 1)
+            return;
+        const before = new Map(snap.counts);
+        const after = readWakeCounts();
+        const btn = readPowerButtonCount();
+        const hits = diffWakeCounts(before, after);
+        if (snap.btn !== null && btn !== null && btn > snap.btn && !hits.includes('Netzschalter'))
+            hits.push('Netzschalter');
+        const w = cands[0];
+        w.evidence = describeDiff(before, after, snap.btn, btn);
+        w.snapshotBased = true;
+        if (hits.length) {
+            w.source = hits.join(', ');
+            w.inferred = false;
+            w.probed = true;
+        }
     }
 
     // Einträge ohne Ursache einmalig anhand des Journals einordnen (auch ältere Aufwecker)
@@ -477,7 +507,7 @@ export default class WakeBarExtension extends Extension {
             notes: [!w.source ? 'Die Ursache konnte nicht ermittelt werden.'
                 : w.inferred ? 'Vermutung: Der Kernel meldet auf diesem Rechner keine Aufweckquelle. Weder Netzschalter noch Deckel noch ein Zeitgeber wurden erkannt – am wahrscheinlichsten hat ein USB-Eingabegerät (Tastatur oder Maus) geweckt.'
                     : 'Belegt: das System hat diese Quelle direkt nach dem Aufwachen gemeldet.',
-                w.evidence ? `Messwerte (Zähler vor→nach dem Schlaf): ${w.evidence.length ? w.evidence.join('; ') : 'keine Änderung'}` : null],
+                w.evidence ? `Messwerte (Zähler vor→nach dem Schlaf${w.snapshotBased ? ', Stand beim Deaktivieren' : ''}): ${w.evidence.length ? w.evidence.join('; ') : 'keine Änderung'}` : null],
         });
         for (const w of wl.slice(0, BAR_ROWS)) {
             const e = wakeEntry(w);
