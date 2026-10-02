@@ -66,12 +66,9 @@ export function diffWakeCounts(before, after) {
     return hits;
 }
 
-// Schlaf-/Aufwachzeiten aus dem Kernel-Journal (asynchron, blockiert die Shell nicht).
-// Liefert [{slept, woke}] in Unix-Sekunden, für Zeiten ab sinceSec.
-export async function readSleepCycles(sinceSec) {
-    const proc = Gio.Subprocess.new(
-        ['journalctl', '_TRANSPORT=kernel', '-o', 'json', '--no-pager', '--since', `@${Math.max(0, Math.floor(sinceSec))}`,
-            '-g', 'PM: suspend (entry|exit)'],
+// journalctl asynchron als Unterprozess (blockiert die Shell nie); liefert die JSON-Zeilen als Objekte
+async function runJournal(args) {
+    const proc = Gio.Subprocess.new(['journalctl', '-o', 'json', '--no-pager', ...args],
         Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_SILENCE);
     const stdout = await new Promise((resolve, reject) => {
         proc.communicate_utf8_async(null, null, (p, res) => {
@@ -82,19 +79,30 @@ export async function readSleepCycles(sinceSec) {
             }
         });
     });
-    const cycles = [];
-    let slept = null;
+    const out = [];
     for (const line of stdout.split('\n')) {
         if (!line)
             continue;
-        let e;
         try {
-            e = JSON.parse(line);
-        } catch (_err) {
-            continue;
-        }
-        const msg = typeof e.MESSAGE === 'string' ? e.MESSAGE : '';
-        const ts = Math.floor(Number(e.__REALTIME_TIMESTAMP) / 1e6);
+            out.push(JSON.parse(line));
+        } catch (_e) { /* defekte Zeile überspringen */ }
+    }
+    return out;
+}
+
+const msgOf = e => (typeof e.MESSAGE === 'string' ? e.MESSAGE : '');
+const tsOf = e => Math.floor(Number(e.__REALTIME_TIMESTAMP) / 1e6);
+
+// Schlaf-/Aufwachzeiten aus dem Kernel-Journal (alle Boots).
+// Liefert [{slept, woke}] in Unix-Sekunden, für Zeiten ab sinceSec.
+export async function readSleepCycles(sinceSec) {
+    const entries = await runJournal(['_TRANSPORT=kernel', '--since', `@${Math.max(0, Math.floor(sinceSec))}`,
+        '-g', 'PM: suspend (entry|exit)']);
+    const cycles = [];
+    let slept = null;
+    for (const e of entries) {
+        const msg = msgOf(e);
+        const ts = tsOf(e);
         if (/PM: suspend entry/.test(msg)) {
             slept = ts;
         } else if (/PM: suspend exit/.test(msg)) {
@@ -103,6 +111,24 @@ export async function readSleepCycles(sinceSec) {
         }
     }
     return cycles;
+}
+
+// Kernel meldet auf vielen Rechnern (auch hier) keine Aufweckquelle. Darum in zwei Stufen:
+//  1. Belegt: logind meldet kurz nach dem Aufwachen Netzschalter bzw. Deckel.
+//  2. Vermutet: kein solches Ereignis → ein Eingabegerät (Tastatur/Maus per USB) hat geweckt.
+// (Die xHCI-Meldung „error in resume … Reinit“ taucht bei jedem S3-Aufwachen auf und sagt nichts über die Ursache.)
+export const INFERRED_SOURCE = 'Tastatur/Maus (vermutet)';
+
+export async function inferWakeCause(wokeSec) {
+    const entries = await runJournal(['--since', `@${wokeSec - 2}`, '--until', `@${wokeSec + 6}`, '-g', 'Power key|Lid (opened|closed)|Suspend key|Hibernate key']);
+    for (const e of entries) {
+        const msg = msgOf(e);
+        if (/Lid opened/.test(msg))
+            return {source: 'Gehäusedeckel', inferred: false};
+        if (/(Power|Suspend|Hibernate) key pressed/.test(msg))
+            return {source: 'Netzschalter', inferred: false};
+    }
+    return {source: INFERRED_SOURCE, inferred: true};
 }
 
 // Merkt sich zwischen zwei Abfragen, ob der Rechner geschlafen hat:

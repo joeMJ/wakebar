@@ -9,7 +9,7 @@ import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 
 import {listInhibitors, classify, isRelevant} from './inhibitors.js';
-import {readWakeCounts, diffWakeCounts, readSleepCycles, ResumeDetector} from './wakelog.js';
+import {readWakeCounts, diffWakeCounts, readSleepCycles, inferWakeCause, ResumeDetector} from './wakelog.js';
 import {loadStore, saveStore, prune} from './store.js';
 import {explain, processInfo, findPid} from './explain.js';
 import {UpdateChecker} from './updater.js';
@@ -214,15 +214,25 @@ export default class WakeBarExtension extends Extension {
         }
         if (!this._store)
             return;
-        this._addWake({slept, woke, source: sources.length ? sources.join(', ') : null});
+        if (sources.length) {
+            this._addWake({slept, woke, source: sources.join(', '), inferred: false, probed: true});
+        } else {
+            const cause = await inferWakeCause(woke).catch(() => ({source: null, inferred: false}));
+            if (!this._store)
+                return;
+            this._addWake({slept, woke, source: cause.source, inferred: cause.inferred, probed: true});
+        }
     }
 
     _addWake(entry) {
         // Doppelte vermeiden (Journal-Import vs. Live-Erkennung)
         const dup = this._store.wakes.find(w => Math.abs(w.woke - entry.woke) <= 5);
         if (dup) {
-            if (!dup.source && entry.source)
+            if (!dup.source && entry.source) {
                 dup.source = entry.source;
+                dup.inferred = entry.inferred;
+                dup.probed = entry.probed;
+            }
             return;
         }
         this._store.wakes.push(entry);
@@ -244,7 +254,26 @@ export default class WakeBarExtension extends Extension {
             this._addWake({slept: c.slept, woke: c.woke, source: null});
         this._store.journalSync = now;
         saveStore(this._store);
+        await this._backfillCauses();
         this._render();
+    }
+
+    // Einträge ohne Ursache einmalig anhand des Journals einordnen (auch ältere Aufwecker)
+    async _backfillCauses() {
+        for (const w of [...this._store.wakes]) {
+            if (w.source || w.probed)
+                continue;
+            const cause = await inferWakeCause(w.woke).catch(() => null);
+            if (!this._store)
+                return;
+            if (cause) {
+                w.source = cause.source;
+                w.inferred = cause.inferred;
+            }
+            w.probed = true;
+        }
+        if (this._store)
+            saveStore(this._store);
     }
 
     // ---- Anzeige (Designstandard: 3-Zonen-Menü, Kacheln, Sidecar, Aktions-Footer) ----
@@ -387,6 +416,9 @@ export default class WakeBarExtension extends Extension {
         const wakeEntry = w => ({
             icon: 'weather-clear-symbolic', title: w.source ?? 'Ursache unbekannt', tag: `{${fmtTime(w.woke)}}`, color: pal.dim,
             lines: [`Geweckt ${fmtTime(w.woke)}`, `Schlief ab ${fmtTime(w.slept)} · ${fmtDuration(w.woke - w.slept)}`],
+            notes: [!w.source ? 'Die Ursache konnte nicht ermittelt werden.'
+                : w.inferred ? 'Vermutung: Der Kernel meldet auf diesem Rechner keine Aufweckquelle. Weder Netzschalter noch Deckel noch ein Zeitgeber wurden erkannt – am wahrscheinlichsten hat ein USB-Eingabegerät (Tastatur oder Maus) geweckt.'
+                    : 'Belegt: das System hat diese Quelle direkt nach dem Aufwachen gemeldet.'],
         });
         for (const w of wl.slice(0, BAR_ROWS)) {
             const e = wakeEntry(w);
