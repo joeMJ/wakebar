@@ -11,6 +11,7 @@ import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import {listInhibitors, classify, isRelevant} from './inhibitors.js';
 import {readWakeCounts, diffWakeCounts, readSleepCycles, ResumeDetector} from './wakelog.js';
 import {loadStore, saveStore, prune} from './store.js';
+import {explain, processInfo, findPid} from './explain.js';
 
 const LOGIND = ['org.freedesktop.login1', '/org/freedesktop/login1', 'org.freedesktop.login1.Manager'];
 const OWN_WHO = 'wakebar';
@@ -29,7 +30,7 @@ const fmtDuration = sec => {
     return d ? `${d} d ${h} h` : h ? `${h} h ${m} min` : `${m} min`;
 };
 const iconFor = i => (i.mode === 'delay' || !/sleep|idle/.test(i.what)) ? 'computer-symbolic'
-    : (/idle/.test(i.what) && !/sleep/.test(i.what)) ? 'video-display-symbolic' : 'system-suspend-symbolic';
+    : (/idle/.test(i.what) && !/sleep/.test(i.what)) ? 'video-display-symbolic' : 'weather-clear-night-symbolic';
 
 export default class WakeBarExtension extends Extension {
     enable() {
@@ -294,7 +295,7 @@ export default class WakeBarExtension extends Extension {
         const holding = real.filter(isRelevant);
         const system = real.filter(i => !isRelevant(i));
         const now = this._cardItem(pal);
-        now.card.add_child(this._topic(pal, 'system-suspend-symbolic', 'Hält gerade wach',
+        now.card.add_child(this._topic(pal, 'weather-clear-night-symbolic', 'Hält gerade wach',
             holding.length ? `{${holding.length}}` : '{Nichts}', holding.length ? this._modeColor(pal, holding[0].mode) : pal.green));
         if (holding.length === 0)
             now.card.add_child(this._plainLine(pal, 'Der Rechner darf schlafen.'));
@@ -308,7 +309,7 @@ export default class WakeBarExtension extends Extension {
         this._hover(sysRow, pal, () => this._sidecarList(pal, 'computer-symbolic', 'Systemintern',
             'verzögern nur das Einschlafen oder betreffen Tasten und Deckel', system.map(i => ({
                 icon: iconFor(i), title: i.who, tag: `{${MODE[i.mode] ?? i.mode}}`, color: this._modeColor(pal, i.mode),
-                lines: [i.why, `${WHAT[i.what] ?? i.what}${i.pid ? ` · PID ${i.pid}` : ''}`]}))));
+                ...this._inhibitorLines(i)}))));
         now.card.add_child(sysRow);
         menu.addMenuItem(now.item);
 
@@ -323,7 +324,8 @@ export default class WakeBarExtension extends Extension {
             return {
                 icon: iconFor(b), title: b.who, tag: b.end === null ? '{läuft noch}' : `{${dur}}`,
                 color: b.end === null ? this._modeColor(pal, b.mode) : pal.dim,
-                lines: [b.why, `${fmtTime(b.start)} ${b.end === null ? 'bis jetzt' : `bis ${fmtTime(b.end)}`} · ${WHAT[b.what] ?? b.what} · ${MODE[b.mode] ?? b.mode}`],
+                lines: [`Grund laut Programm: ${b.why}`, `${fmtTime(b.start)} ${b.end === null ? 'bis jetzt' : `bis ${fmtTime(b.end)}`} · ${WHAT[b.what] ?? b.what} · ${MODE[b.mode] ?? b.mode}`],
+                notes: [explain(b.who, b.why, b.mode).why],
             };
         };
         for (const b of past.slice(0, BAR_ROWS)) {
@@ -479,7 +481,7 @@ export default class WakeBarExtension extends Extension {
         const sidecar = this._getSidecar();
         sidecar.destroy_all_children();
         sidecar.style = `background-color: ${pal.sideBg}; border: 1px solid ${pal.sideBorder}; border-radius: 12px; padding: 14px 16px; min-width: 400px; max-width: 460px; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.22);`;
-        build(sidecar);
+        build()(sidecar);
         sidecar.show();
 
         GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
@@ -516,6 +518,13 @@ export default class WakeBarExtension extends Extension {
         sidecar.add_child(row);
     }
 
+    _wrapped(text, style) {
+        const label = new St.Label({text, style});
+        label.clutter_text.line_wrap = true;
+        label.clutter_text.ellipsize = 0;
+        return label;
+    }
+
     _sidecarList(pal, icon, title, sub, entries) {
         return sidecar => {
             this._sidecarHeader(sidecar, pal, icon, title, sub);
@@ -523,26 +532,40 @@ export default class WakeBarExtension extends Extension {
             if (entries.length === 0)
                 list.add_child(new St.Label({text: 'Keine Einträge.', style: `font-size: 11px; color: ${pal.dim};`}));
             for (const e of entries) {
-                const head = new St.BoxLayout({y_align: Clutter.ActorAlign.CENTER, style: 'margin-top: 6px;'});
+                const head = new St.BoxLayout({y_align: Clutter.ActorAlign.CENTER, style: 'margin-top: 8px;'});
                 head.add_child(new St.Icon({icon_name: e.icon, icon_size: 12, style: `margin-right: 6px; color: ${pal.text};`}));
                 head.add_child(new St.Label({text: e.title, x_expand: true, style: `font-weight: bold; font-size: 11px; color: ${pal.text};`}));
                 head.add_child(new St.Label({text: e.tag, style: `font-weight: bold; font-size: 11px; font-feature-settings: "tnum"; color: ${e.color};`}));
                 list.add_child(head);
                 for (const l of e.lines.filter(Boolean))
-                    list.add_child(new St.Label({text: l, style: `font-size: 11px; color: ${pal.dim}; margin-left: 18px;`}));
+                    list.add_child(this._wrapped(l, `font-size: 11px; color: ${pal.dim}; margin-left: 18px;`));
+                for (const n of (e.notes ?? []).filter(Boolean))
+                    list.add_child(this._wrapped(n, `font-size: 11px; color: ${pal.text}; margin-left: 18px; margin-top: 3px;`));
             }
             sidecar.add_child(list);
         };
     }
 
+    // Prozess- und Erklärungszeilen für eine Sperre (Programm, Grund laut Programm, Prozess, Bedeutung des Modus)
+    _inhibitorLines(i, since) {
+        const pid = i.pid || findPid(i.appId);
+        const proc = processInfo(pid);
+        const lines = [`Grund laut Programm: ${i.why}`, `Betrifft: ${WHAT[i.what] ?? i.what}`];
+        if (pid) {
+            lines.push(proc
+                ? `Prozess: ${proc.cmd} (PID ${pid})${proc.started ? ` – läuft seit ${fmtTime(proc.started)}` : ''}`
+                : `Prozess: PID ${pid} (beendet)`);
+        }
+        if (since)
+            lines.push(`Sperre seit: ${fmtTime(since)} (${fmtDuration(Date.now() / 1000 - since)})`);
+        const ex = explain(i.who, i.why, i.mode);
+        return {lines, notes: [ex.why, ex.mode]};
+    }
+
     _sidecarInhibitor(pal, i, since) {
-        const entry = {
-            icon: iconFor(i), title: i.who, tag: `{${MODE[i.mode] ?? i.mode}}`, color: this._modeColor(pal, i.mode),
-            lines: [`Grund: ${i.why}`, `Betrifft: ${WHAT[i.what] ?? i.what}`,
-                i.pid ? `Prozess: PID ${i.pid}` : null,
-                since ? `Seit: ${fmtTime(since)} (${fmtDuration(Date.now() / 1000 - since)})` : null],
-        };
-        return this._sidecarList(pal, 'system-suspend-symbolic', 'Hält den Rechner wach', null, [entry]);
+        const {lines, notes} = this._inhibitorLines(i, since);
+        const entry = {icon: iconFor(i), title: i.who, tag: `{${MODE[i.mode] ?? i.mode}}`, color: this._modeColor(pal, i.mode), lines, notes};
+        return this._sidecarList(pal, 'weather-clear-night-symbolic', 'Warum hält das den Rechner wach?', null, [entry]);
     }
 
     // ---- Wach halten -------------------------------------------------------

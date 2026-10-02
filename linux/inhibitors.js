@@ -44,13 +44,24 @@ async function sessionInhibitors(cancellable) {
             const [appId] = (await call(bus, target, 'GetAppId', null, new GLib.VariantType('(s)'), cancellable)).deepUnpack();
             const [why] = (await call(bus, target, 'GetReason', null, new GLib.VariantType('(s)'), cancellable)).deepUnpack();
             const [flags] = (await call(bus, target, 'GetFlags', null, new GLib.VariantType('(u)'), cancellable)).deepUnpack();
+            let pid = 0;
+            try {
+                const [clientPath] = (await call(bus, target, 'GetClientId', null, new GLib.VariantType('(o)'), cancellable)).deepUnpack();
+                if (clientPath && clientPath !== '/') {
+                    const client = [SESSION[0], clientPath, 'org.gnome.SessionManager.Client'];
+                    [pid] = (await call(bus, client, 'GetUnixProcessId', null, new GLib.VariantType('(u)'), cancellable)).deepUnpack();
+                }
+            } catch (e) {
+                if (e.matches?.(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED))
+                    throw e;
+            }
             if (!(flags & (FLAG_SUSPEND | FLAG_IDLE)))
                 continue;   // nur Logout/Benutzerwechsel/Automount: für Schlaf unerheblich
             out.push({
                 who: appName(appId), why: why || '–',
                 what: (flags & FLAG_SUSPEND) ? 'sleep' : 'idle',
                 mode: (flags & FLAG_SUSPEND) ? 'block' : 'block-weak',
-                uid: 0, pid: 0, source: 'session',
+                uid: 0, pid, appId, source: 'session',
             });
         } catch (e) {
             if (e.matches?.(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED))
