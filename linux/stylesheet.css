@@ -6,15 +6,10 @@
 .wakebar-blue   { color: #3584e4; }
 .wakebar-count  { font-weight: 500; font-feature-settings: "tnum"; font-variant-numeric: tabular-nums; min-width: 1.2em; }
 
+/* Karten: Rand und Farben setzt extension.js je nach Hell/Dunkel (Designstandard snmpbar) */
 .wakebar-card {
     margin: 4px 6px;
-    padding: 8px 14px;
+    padding: 10px 14px;
     border-radius: 8px;
-    border-width: 1px;
-    border-style: solid;
-    border-color: #ffffff25;
-    min-width: 24em;
+    min-width: 380px;
 }
-.wakebar-card-title { font-weight: 700; }
-.wakebar-card-detail { font-weight: 400; color: #77767b; font-size: 0.9em; }
-.wakebar-section { font-weight: 600; margin: 6px 14px 0 14px; }

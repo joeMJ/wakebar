@@ -16,6 +16,12 @@ const LOGIND = ['org.freedesktop.login1', '/org/freedesktop/login1', 'org.freede
 const OWN_WHO = 'wakebar';
 const SAVE_EVERY_SEC = 60;
 
+const WHAT = {sleep: 'Schlaf', idle: 'Leerlauf', shutdown: 'Herunterfahren', 'sleep:idle': 'Schlaf und Leerlauf'};
+const MODE = {block: 'blockiert', 'block-weak': 'bremst', delay: 'verzögert'};
+const MODE_COLOR = {block: '#e01b24', 'block-weak': '#f5c211', delay: '#77767b'};
+const iconFor = i => (i.mode === 'delay' || !/sleep|idle/.test(i.what)) ? 'computer-symbolic'
+    : /idle/.test(i.what) && !/sleep/.test(i.what) ? 'video-display-symbolic' : 'system-suspend-symbolic';
+
 const fmtTime = sec => GLib.DateTime.new_from_unix_local(sec).format('%d.%m. %H:%M');
 const fmtDuration = sec => {
     sec = Math.max(0, Math.round(sec));
@@ -34,6 +40,12 @@ export default class WakeBarExtension extends Extension {
         this._wakeCounts = readWakeCounts();
         this._resume = new ResumeDetector();
         this._lastSave = 0;
+        try {
+            this._interfaceSettings = new Gio.Settings({schema_id: 'org.gnome.desktop.interface'});
+            this._schemeId = this._interfaceSettings.connect('changed::color-scheme', () => this._render());
+        } catch (_e) {
+            this._interfaceSettings = null;
+        }
 
         this._buildPanel();
         this._importJournal().catch(e => console.error(`wakebar: Journal-Import fehlgeschlagen: ${e.message}`));
@@ -52,6 +64,10 @@ export default class WakeBarExtension extends Extension {
         this._cancellable?.cancel();
         this._cancellable = null;
         this._stopKeepAwake();
+        if (this._schemeId)
+            this._interfaceSettings.disconnect(this._schemeId);
+        this._schemeId = null;
+        this._interfaceSettings = null;
         if (this._store)
             saveStore(this._store);
         this._button?.destroy();
@@ -74,9 +90,12 @@ export default class WakeBarExtension extends Extension {
         this._keepItem.connect('toggled', (_i, on) => on ? this._startKeepAwake() : this._stopKeepAwake());
         menu.addMenuItem(this._keepItem);
         this._lastWakeItem = new PopupMenu.PopupMenuItem('', {reactive: false});
+        this._lastWakeItem.label.style = 'font-size: 0.9em;';
         menu.addMenuItem(this._lastWakeItem);
         this._nowSection = new PopupMenu.PopupMenuSection();
         menu.addMenuItem(this._nowSection);
+        this._systemMenu = new PopupMenu.PopupSubMenuMenuItem('Systemintern');
+        menu.addMenuItem(this._systemMenu);
         this._pastMenu = new PopupMenu.PopupSubMenuMenuItem('Hielt vom Schlafen ab');
         menu.addMenuItem(this._pastMenu);
         this._wakeMenu = new PopupMenu.PopupSubMenuMenuItem('Aufwecker');
@@ -203,6 +222,14 @@ export default class WakeBarExtension extends Extension {
 
     // ---- Anzeige -----------------------------------------------------------
 
+    // Farben nach Designstandard (snmpbar): Hell/Dunkel über GNOME-Interface-Einstellung
+    _palette() {
+        const dark = this._interfaceSettings?.get_string('color-scheme') === 'prefer-dark';
+        return dark
+            ? {text: '#f6f6f6', dim: '#9a9996', border: '#ffffff25', bg: '#00000000'}
+            : {text: '#1a1a1a', dim: '#77767b', border: '#5e5c64ff', bg: '#00000000'};
+    }
+
     _render() {
         if (!this._button)
             return;
@@ -210,29 +237,40 @@ export default class WakeBarExtension extends Extension {
         this._dot.style_class = `wakebar-dot wakebar-${state}`;
         this._count.text = count > 0 ? String(count) : '';
 
+        const pal = this._palette();
         const others = this._inhibitors.filter(i => i.who !== OWN_WHO);
         const wakes = this._store.wakes;
         const last = wakes.at(-1);
         this._lastWakeItem.label.text = last
             ? `Zuletzt geweckt: ${fmtTime(last.woke)} – ${last.source ?? 'Ursache unbekannt'}`
-            : 'Noch kein Aufwachen protokolliert';
+            : 'Noch kein Aufwecken protokolliert';
 
+        // Aktuell: nur Sperren auf Schlaf/Leerlauf halten wach; der Rest ist Systemintern
         this._nowSection.removeAll();
-        const blocking = others.filter(i => i.mode !== 'delay');
-        const delaying = others.filter(i => i.mode === 'delay');
-        this._addGroup(this._nowSection, 'Hält gerade wach', blocking, 'Nichts hält den Rechner wach.');
-        this._addGroup(this._nowSection, 'Verzögert nur das Einschlafen (normal)', delaying, null);
+        const holding = others.filter(isRelevant);
+        const system = others.filter(i => !isRelevant(i));
+        this._nowSection.addMenuItem(new PopupMenu.PopupSeparatorMenuItem('Hält gerade wach'));
+        if (holding.length === 0)
+            this._nowSection.addMenuItem(this._plain('Nichts hält den Rechner wach.', pal));
+        for (const i of holding)
+            this._nowSection.addMenuItem(this._card(i.who, i.why, this._detail(i), pal, {tag: i.mode, icon: iconFor(i)}));
+
+        this._systemMenu.label.text = `Systemintern (${system.length})`;
+        this._systemMenu.menu.removeAll();
+        for (const i of system)
+            this._systemMenu.menu.addMenuItem(this._card(i.who, i.why, this._detail(i), pal, {tag: i.mode, icon: iconFor(i)}));
 
         // Protokoll: Sperren
         const past = [...this._store.blockers].reverse();
         this._pastMenu.label.text = `Hielt vom Schlafen ab (${past.length})`;
         this._pastMenu.menu.removeAll();
         if (past.length === 0)
-            this._pastMenu.menu.addMenuItem(new PopupMenu.PopupMenuItem('Keine Einträge', {reactive: false}));
+            this._pastMenu.menu.addMenuItem(this._plain('Keine Einträge', pal));
         for (const b of past.slice(0, 50)) {
             const until = b.end === null ? 'läuft noch' : `bis ${fmtTime(b.end)}`;
             const dur = fmtDuration((b.end ?? Math.floor(Date.now() / 1000)) - b.start);
-            this._pastMenu.menu.addMenuItem(this._card(b.who, b.why, `${fmtTime(b.start)} ${until} · ${dur} · ${b.what} · ${b.mode}`));
+            this._pastMenu.menu.addMenuItem(this._card(b.who, b.why,
+                `${fmtTime(b.start)} ${until} · ${dur} · ${WHAT[b.what] ?? b.what}`, pal, {tag: b.mode, icon: iconFor(b)}));
         }
 
         // Protokoll: Aufwecker
@@ -240,35 +278,54 @@ export default class WakeBarExtension extends Extension {
         this._wakeMenu.label.text = `Aufwecker (${wl.length})`;
         this._wakeMenu.menu.removeAll();
         if (wl.length === 0)
-            this._wakeMenu.menu.addMenuItem(new PopupMenu.PopupMenuItem('Keine Einträge', {reactive: false}));
+            this._wakeMenu.menu.addMenuItem(this._plain('Keine Einträge', pal));
         for (const w of wl.slice(0, 50)) {
             this._wakeMenu.menu.addMenuItem(this._card(
-                `Geweckt ${fmtTime(w.woke)}`, w.source ?? 'Ursache unbekannt',
-                `Schlief ab ${fmtTime(w.slept)} · ${fmtDuration(w.woke - w.slept)}`));
+                w.source ?? 'Ursache unbekannt', `Geweckt ${fmtTime(w.woke)}`,
+                `Schlief ab ${fmtTime(w.slept)} · ${fmtDuration(w.woke - w.slept)}`, pal,
+                {icon: 'preferences-system-time-symbolic'}));
         }
     }
 
-    _card(title, detail, extra) {
-        const card = new St.BoxLayout({vertical: true, style_class: 'wakebar-card'});
-        card.add_child(new St.Label({text: title, style_class: 'wakebar-card-title'}));
-        card.add_child(new St.Label({text: detail, style_class: 'wakebar-card-detail'}));
-        if (extra)
-            card.add_child(new St.Label({text: extra, style_class: 'wakebar-card-detail'}));
-        const item = new PopupMenu.PopupBaseMenuItem({reactive: false});
-        item.add_child(card);
+    _detail(i) {
+        return `${WHAT[i.what] ?? i.what}${i.pid ? ` · PID ${i.pid}` : ''}`;
+    }
+
+    _plain(text, pal) {
+        const item = new PopupMenu.PopupBaseMenuItem({reactive: false, can_focus: false});
+        item.add_child(new St.Label({text, style: `color: ${pal.dim}; font-size: 0.9em;`}));
         return item;
     }
 
-    _addGroup(section, title, items, emptyText) {
-        if (items.length === 0 && !emptyText)
-            return;
-        section.addMenuItem(new PopupMenu.PopupSeparatorMenuItem(title));
-        if (items.length === 0) {
-            section.addMenuItem(new PopupMenu.PopupMenuItem(emptyText, {reactive: false}));
-            return;
+    // Karte im snmpbar-Look: 8 px Radius, 1 px Rand, Titel 700, Zusatzzeilen gedimmt, Status in {geschweiften Klammern}
+    _card(title, detail, extra, pal, {tag = null, icon = null} = {}) {
+        const item = new PopupMenu.PopupBaseMenuItem({reactive: false, can_focus: false});
+        item.style = 'padding: 0; min-height: 0;';
+        const card = new St.BoxLayout({
+            style_class: 'wakebar-card', vertical: true, x_expand: true,
+            style: `border: 1px solid ${pal.border}; background-color: ${pal.bg};`,
+        });
+        const row = new St.BoxLayout({y_align: Clutter.ActorAlign.CENTER});
+        if (icon)
+            row.add_child(new St.Icon({icon_name: icon, icon_size: 16, style: `margin-right: 8px; color: ${pal.text};`}));
+        row.add_child(new St.Label({text: title, x_expand: true, style: `font-weight: 700; font-size: 0.95em; color: ${pal.text};`}));
+        if (tag) {
+            row.add_child(new St.Label({
+                text: `{${MODE[tag] ?? tag}}`, y_align: Clutter.ActorAlign.CENTER,
+                style: `font-weight: 600; font-size: 0.85em; color: ${MODE_COLOR[tag] ?? pal.dim};`,
+            }));
         }
-        for (const i of items)
-            section.addMenuItem(this._card(i.who, i.why, `${i.what} · ${i.mode}${i.pid ? ` · PID ${i.pid}` : ''}`));
+        card.add_child(row);
+        for (const line of [detail, extra]) {
+            if (line) {
+                card.add_child(new St.Label({
+                    text: line,
+                    style: `font-size: 0.82em; color: ${pal.dim}; font-feature-settings: "tnum"; margin-left: ${icon ? 24 : 0}px;`,
+                }));
+            }
+        }
+        item.add_child(card);
+        return item;
     }
 
     // ---- Wach halten -------------------------------------------------------
