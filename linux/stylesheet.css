@@ -13,7 +13,7 @@
     border-width: 1px;
     border-style: solid;
     border-color: #ffffff25;
-    min-width: 22em;
+    min-width: 24em;
 }
 .wakebar-card-title { font-weight: 700; }
 .wakebar-card-detail { font-weight: 400; color: #77767b; font-size: 0.9em; }
