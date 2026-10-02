@@ -34,6 +34,27 @@ const fmtDuration = sec => {
 const iconFor = i => (i.mode === 'delay' || !/sleep|idle/.test(i.what)) ? 'computer-symbolic'
     : (/idle/.test(i.what) && !/sleep/.test(i.what)) ? 'video-display-symbolic' : 'weather-clear-night-symbolic';
 
+const MERGE_GAP_SEC = 300;
+
+// Programme, die ihre Sperre oft kurz setzen und lösen (z. B. Electron-Apps bei Aktivität), würden das Protokoll fluten:
+// gleiche Sperren (Programm/Grund/Art/Modus) mit höchstens 5 min Lücke werden zu einem Eintrag mit Anzahl und Gesamtdauer.
+function mergeBlockers(list, nowSec = Math.floor(Date.now() / 1000)) {
+    const out = [];
+    for (const b of [...list].sort((a, c) => a.start - c.start)) {
+        const key = `${b.who}|${b.why}|${b.what}|${b.mode}`;
+        const prev = out.findLast(m => m.key === key);
+        const bEnd = b.end ?? nowSec;
+        if (prev && b.start - (prev.end ?? nowSec) <= MERGE_GAP_SEC) {
+            prev.end = b.end;
+            prev.n += 1;
+            prev.active += Math.max(0, bEnd - b.start);
+        } else {
+            out.push({...b, key, n: 1, active: Math.max(0, bEnd - b.start)});
+        }
+    }
+    return out;
+}
+
 export default class WakeBarExtension extends Extension {
     enable() {
         this._settings = this.getSettings();
@@ -461,17 +482,21 @@ export default class WakeBarExtension extends Extension {
         menu.addMenuItem(now.item);
 
         // Zone 2b: Hielt vom Schlafen ab
-        const past = [...this._store.blockers].reverse();
+        const past = mergeBlockers(this._store.blockers).reverse();
         const pastCard = this._cardItem(pal);
         pastCard.card.add_child(this._topic(pal, 'view-list-symbolic', 'Hielt vom Schlafen ab', `{${past.length}}`, pal.dim));
         if (past.length === 0)
             pastCard.card.add_child(this._plainLine(pal, 'Keine Einträge im gewählten Zeitraum.'));
         const pastEntry = b => {
-            const dur = fmtDuration((b.end ?? Math.floor(Date.now() / 1000)) - b.start);
+            const open = b.end === null;
+            const span = `${fmtTime(b.start)} ${open ? 'bis jetzt' : `bis ${fmtTime(b.end)}`}`;
             return {
-                icon: iconFor(b), title: b.who, tag: b.end === null ? '{läuft noch}' : `{${dur}}`,
-                color: b.end === null ? this._modeColor(pal, b.mode) : pal.dim,
-                lines: [`Grund laut Programm: ${b.why}`, `${fmtTime(b.start)} ${b.end === null ? 'bis jetzt' : `bis ${fmtTime(b.end)}`} · ${WHAT[b.what] ?? b.what} · ${MODE[b.mode] ?? b.mode}`],
+                icon: iconFor(b), title: b.n > 1 ? `${b.who} (${b.n}×)` : b.who,
+                tag: open ? '{läuft noch}' : `{${fmtDuration(b.active)}}`,
+                color: open ? this._modeColor(pal, b.mode) : pal.dim,
+                lines: [`Grund laut Programm: ${b.why}`,
+                    `${span} · ${WHAT[b.what] ?? b.what} · ${MODE[b.mode] ?? b.mode}`,
+                    b.n > 1 ? `${b.n} Sperren, zusammen ${fmtDuration(b.active)} aktiv (Lücken bis 5 min zusammengefasst)` : null],
                 notes: [explain(b.who, b.why, b.mode).why],
             };
         };
@@ -690,6 +715,25 @@ export default class WakeBarExtension extends Extension {
             }
             sidecar.add_child(list);
         };
+    }
+
+    // Erklärung zur Aufweck-Ursache: belegt (Zähler/Journal), per Ausschluss oder Vermutung
+    _wakeNote(w) {
+        const T = {
+            usb: 'Belegt: Der USB-Controller hat geweckt, also eine Taste oder die Maus. Tastatur und Maus lassen sich nicht trennen – der Kernel zählt Weckvorgänge nur am Controller, nicht je Gerät.',
+            button: 'Belegt: Das System hat den Netzschalter direkt gemeldet.',
+            lid: 'Belegt: Der Gehäusedeckel wurde geöffnet.',
+            journal: 'Belegt: logind hat die Quelle kurz nach dem Aufwachen gemeldet.',
+            other: 'Belegt: Das System hat diese Quelle direkt nach dem Aufwachen gemeldet.',
+            exclusion: 'Per Ausschluss: Weder ein USB-Gerät noch Deckel oder Zeitgeber haben sich gemeldet, nur der allgemeine ACPI-Zähler – typisch für den Netzschalter.',
+        };
+        if (!w.source)
+            return 'Die Ursache konnte nicht ermittelt werden.';
+        if (w.reason && T[w.reason])
+            return T[w.reason];
+        return w.inferred
+            ? 'Vermutung: Der Kernel meldet auf diesem Rechner keine Aufweckquelle. Weder Netzschalter noch Deckel noch ein Zeitgeber wurden erkannt – am wahrscheinlichsten hat ein USB-Eingabegerät (Tastatur oder Maus) geweckt.'
+            : 'Belegt: Das System hat diese Quelle direkt nach dem Aufwachen gemeldet.';
     }
 
     // Prozess- und Erklärungszeilen für eine Sperre (Programm, Grund laut Programm, Prozess, Bedeutung des Modus)
