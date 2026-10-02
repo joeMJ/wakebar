@@ -9,7 +9,7 @@ import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 
 import {listInhibitors, classify, isRelevant} from './inhibitors.js';
-import {readWakeCounts, diffWakeCounts, readPowerButtonCount, readSleepCycles, inferWakeCause, ResumeDetector} from './wakelog.js';
+import {readWakeCounts, diffWakeCounts, describeDiff, readPowerButtonCount, readSleepCycles, inferWakeCause, ResumeDetector} from './wakelog.js';
 import {loadStore, saveStore, prune} from './store.js';
 import {explain, processInfo, findPid} from './explain.js';
 import {UpdateChecker} from './updater.js';
@@ -44,6 +44,23 @@ export default class WakeBarExtension extends Extension {
         this._closeStaleBlockers();
         this._wakeCounts = readWakeCounts();
         this._pwrBtn = readPowerButtonCount();
+        this._preSleep = null;
+        this._lastResumeHandled = 0;
+        // logind meldet den Schlaf-Beginn/-Ende per Signal: exakter Zählerstand direkt VOR dem Schlaf
+        this._sleepSub = Gio.DBus.system.signal_subscribe(LOGIND[0], LOGIND[2], 'PrepareForSleep', LOGIND[1], null,
+            Gio.DBusSignalFlags.NONE, (_c, _s, _p, _i, _sig, params) => {
+                const [start] = params.deepUnpack();
+                if (start) {
+                    this._preSleep = {counts: readWakeCounts(), btn: readPowerButtonCount()};
+                } else if (this._preSleep) {
+                    const pre = this._preSleep;
+                    this._preSleep = null;
+                    this._lastResumeHandled = Date.now() / 1000;
+                    const to = Math.floor(Date.now() / 1000);
+                    this._recordWake({from: to - 1, to}, pre.counts, pre.btn)
+                        .catch(e => console.error(`wakebar: Aufwecker nicht erfasst: ${e.message}`));
+                }
+            });
         this._resume = new ResumeDetector();
         this._lastSave = 0;
         this._lastCheck = Math.floor(Date.now() / 1000);
@@ -79,6 +96,10 @@ export default class WakeBarExtension extends Extension {
         if (this._updateTimer) {
             GLib.source_remove(this._updateTimer);
             this._updateTimer = null;
+        }
+        if (this._sleepSub) {
+            Gio.DBus.system.signal_unsubscribe(this._sleepSub);
+            this._sleepSub = null;
         }
         this._cancellable?.cancel();
         this._cancellable = null;
@@ -154,7 +175,7 @@ export default class WakeBarExtension extends Extension {
         const counts = readWakeCounts();
         this._wakeCounts = counts;
         this._pwrBtn = readPowerButtonCount();
-        if (resumed)
+        if (resumed && Date.now() / 1000 - this._lastResumeHandled > 120)
             await this._recordWake(resumed, before, beforeBtn);
         if (!this._button)
             return;
@@ -236,13 +257,14 @@ export default class WakeBarExtension extends Extension {
         }
         if (!this._store)
             return;
+        const evidence = describeDiff(before, readWakeCounts(), beforeBtn, readPowerButtonCount());
         if (sources.length) {
-            this._addWake({slept, woke, source: sources.join(', '), inferred: false, probed: true});
+            this._addWake({slept, woke, source: sources.join(', '), inferred: false, probed: true, evidence});
         } else {
             const cause = await inferWakeCause(woke).catch(() => ({source: null, inferred: false}));
             if (!this._store)
                 return;
-            this._addWake({slept, woke, source: cause.source, inferred: cause.inferred, probed: true});
+            this._addWake({slept, woke, source: cause.source, inferred: cause.inferred, probed: true, evidence});
         }
     }
 
@@ -250,11 +272,14 @@ export default class WakeBarExtension extends Extension {
         // Doppelte vermeiden (Journal-Import vs. Live-Erkennung)
         const dup = this._store.wakes.find(w => Math.abs(w.woke - entry.woke) <= 5);
         if (dup) {
-            if (!dup.source && entry.source) {
+            // Besseres Ergebnis (belegt statt vermutet/leer) übernehmen, Messwerte immer ergänzen
+            if ((!dup.source || (dup.inferred && entry.inferred === false)) && entry.source) {
                 dup.source = entry.source;
                 dup.inferred = entry.inferred;
                 dup.probed = entry.probed;
             }
+            if (entry.evidence && !dup.evidence)
+                dup.evidence = entry.evidence;
             return;
         }
         this._store.wakes.push(entry);
@@ -440,7 +465,8 @@ export default class WakeBarExtension extends Extension {
             lines: [`Geweckt ${fmtTime(w.woke)}`, `Schlief ab ${fmtTime(w.slept)} · ${fmtDuration(w.woke - w.slept)}`],
             notes: [!w.source ? 'Die Ursache konnte nicht ermittelt werden.'
                 : w.inferred ? 'Vermutung: Der Kernel meldet auf diesem Rechner keine Aufweckquelle. Weder Netzschalter noch Deckel noch ein Zeitgeber wurden erkannt – am wahrscheinlichsten hat ein USB-Eingabegerät (Tastatur oder Maus) geweckt.'
-                    : 'Belegt: das System hat diese Quelle direkt nach dem Aufwachen gemeldet.'],
+                    : 'Belegt: das System hat diese Quelle direkt nach dem Aufwachen gemeldet.',
+                w.evidence ? `Messwerte (Zähler vor→nach dem Schlaf): ${w.evidence.length ? w.evidence.join('; ') : 'keine Änderung'}` : null],
         });
         for (const w of wl.slice(0, BAR_ROWS)) {
             const e = wakeEntry(w);

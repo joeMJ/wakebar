@@ -56,6 +56,19 @@ export function readWakeCounts() {
     return out;
 }
 
+// Messprotokoll: alle Zähler, die sich verändert haben („PNP0C0C:00 [Netzschalter] 3→4“), für die Fehlersuche im Sidecar
+export function describeDiff(before, after, btnBefore, btnAfter) {
+    const out = [];
+    for (const [id, cur] of after) {
+        const prev = before.get(id);
+        if (prev && cur.count !== prev.count)
+            out.push(`${id} ${cur.label}: ${prev.count}→${cur.count}`);
+    }
+    if (btnBefore !== null && btnAfter !== null && btnBefore !== btnAfter)
+        out.push(`ACPI ff_pwr_btn: ${btnBefore}→${btnAfter}`);
+    return out;
+}
+
 // ACPI-Festereignis „Netzschalter“: zählt jeden Druck, auch den, der den Rechner aus S3 weckt
 export function readPowerButtonCount() {
     const n = parseInt(readText('/sys/firmware/acpi/interrupts/ff_pwr_btn'), 10);
