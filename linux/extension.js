@@ -98,6 +98,8 @@ export default class WakeBarExtension extends Extension {
                 this._hideSidecar(true);
         });
         Main.panel.addToStatusArea('wakebar@johnlose.de', this._button, 0, this._settings.get_string('panel-position'));
+        // Ein leeres PopupMenu öffnet sich nicht: von Anfang an befüllen, beim Öffnen erneuern
+        this._rebuildMenu(true);
     }
 
     // ---- Datenerfassung -------------------------------------------------
