@@ -1,0 +1,53 @@
+# Lokale Konfigurationen und Passwörter / Secrets
+config.json
+connections.json
+config.yaml
+config.yml
+*.local.json
+*.local.yaml
+*.local.yml
+secrets.json
+secrets.yaml
+.env
+
+# Kompilierte GSettings Schemas
+gschemas.compiled
+linux/schemas/gschemas.compiled
+schemas/gschemas.compiled
+
+# Byte-compiled / Python-Reste (falls Helper genutzt werden)
+__pycache__/
+*.py[cod]
+*$py.class
+.venv
+venv/
+
+# Build & Paketierung
+build/
+dist/
+*.zip
+*.tar.gz
+
+# IDE & Editor Artefakte
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+
+# Zugangsdaten & lokale Konfiguration (nie committen)
+*.env
+secrets.*
+*.dconf
+dconf-*.ini
+.claude/settings.local.json
+
+# Signaturschlüssel (z. B. Windows-Build)
+*.pfx
+*.snk
+
+# Sonstiges
+.DS_Store

@@ -1,0 +1,20 @@
+/* wakebar – Farben und Karten wie snmpbar (Adwaita-Palette) */
+.wakebar-dot { font-size: 1.0em; font-weight: 700; }
+.wakebar-green  { color: #2ec27e; }
+.wakebar-yellow { color: #f5c211; }
+.wakebar-red    { color: #e01b24; }
+.wakebar-blue   { color: #3584e4; }
+.wakebar-count  { font-weight: 500; font-feature-settings: "tnum"; font-variant-numeric: tabular-nums; min-width: 1.2em; }
+
+.wakebar-card {
+    margin: 4px 6px;
+    padding: 8px 14px;
+    border-radius: 8px;
+    border-width: 1px;
+    border-style: solid;
+    border-color: #ffffff25;
+    min-width: 22em;
+}
+.wakebar-card-title { font-weight: 700; }
+.wakebar-card-detail { font-weight: 400; color: #77767b; font-size: 0.9em; }
+.wakebar-section { font-weight: 600; margin: 6px 14px 0 14px; }

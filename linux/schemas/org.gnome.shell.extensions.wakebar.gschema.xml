@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gnome.shell.extensions.wakebar" path="/org/gnome/shell/extensions/wakebar/">
+    <key name="refresh-interval" type="u">
+      <default>5</default>
+      <summary>Abfrageintervall in Sekunden</summary>
+    </key>
+    <key name="retention" type="s">
+      <default>'3d'</default>
+      <summary>Aufbewahrung des Protokolls: last-wake, 1d, 3d, 7d, 14d</summary>
+    </key>
+    <key name="panel-position" type="s">
+      <default>'right'</default>
+      <summary>Position in der Leiste: left, center, right</summary>
+    </key>
+    <key name="ignored-programs" type="as">
+      <default>[]</default>
+      <summary>Programme, die die Ampel nicht beeinflussen</summary>
+    </key>
+  </schema>
+</schemalist>
