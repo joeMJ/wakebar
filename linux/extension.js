@@ -9,7 +9,7 @@ import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 
 import {listInhibitors, classify, isRelevant} from './inhibitors.js';
-import {readWakeCounts, diffWakeCounts, readSleepCycles, inferWakeCause, ResumeDetector} from './wakelog.js';
+import {readWakeCounts, diffWakeCounts, readPowerButtonCount, readSleepCycles, inferWakeCause, ResumeDetector} from './wakelog.js';
 import {loadStore, saveStore, prune} from './store.js';
 import {explain, processInfo, findPid} from './explain.js';
 import {UpdateChecker} from './updater.js';
@@ -43,6 +43,7 @@ export default class WakeBarExtension extends Extension {
         this._store = loadStore();
         this._closeStaleBlockers();
         this._wakeCounts = readWakeCounts();
+        this._pwrBtn = readPowerButtonCount();
         this._resume = new ResumeDetector();
         this._lastSave = 0;
         this._lastCheck = Math.floor(Date.now() / 1000);
@@ -148,10 +149,13 @@ export default class WakeBarExtension extends Extension {
         this._inhibitors = list.filter(i => !ignored.includes(i.who));
 
         const resumed = this._resume.check();
+        const before = this._wakeCounts;       // Stand vor dem Schlaf (letzte Abfrage)
+        const beforeBtn = this._pwrBtn;
         const counts = readWakeCounts();
-        if (resumed)
-            await this._recordWake(resumed, diffWakeCounts(this._wakeCounts, counts));
         this._wakeCounts = counts;
+        this._pwrBtn = readPowerButtonCount();
+        if (resumed)
+            await this._recordWake(resumed, before, beforeBtn);
         if (!this._button)
             return;
 
@@ -199,7 +203,9 @@ export default class WakeBarExtension extends Extension {
         }
     }
 
-    async _recordWake(resumed, sources) {
+    // Aufweck-Zähler und ACPI-Netzschalter werden erst kurz NACH dem Aufwachen aktuell → nach einer kurzen
+    // Wartezeit noch einmal lesen (sonst gewinnt das Rennen mit dem Kernel und der Netzschalter bleibt unerkannt).
+    async _recordWake(resumed, before, beforeBtn) {
         let woke = resumed.to;
         let slept = resumed.from;
         try {
@@ -211,6 +217,22 @@ export default class WakeBarExtension extends Extension {
             }
         } catch (e) {
             console.error(`wakebar: Journal nicht lesbar: ${e.message}`);
+        }
+
+        const detect = () => {
+            const hits = diffWakeCounts(before, readWakeCounts());
+            const btn = readPowerButtonCount();
+            if (beforeBtn !== null && btn !== null && btn > beforeBtn && !hits.includes('Netzschalter'))
+                hits.push('Netzschalter');
+            return hits;
+        };
+        let sources = detect();
+        if (sources.length === 0) {
+            await new Promise(resolve => GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, 4, () => {
+                resolve();
+                return GLib.SOURCE_REMOVE;
+            }));
+            sources = detect();
         }
         if (!this._store)
             return;

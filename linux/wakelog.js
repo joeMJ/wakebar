@@ -56,6 +56,12 @@ export function readWakeCounts() {
     return out;
 }
 
+// ACPI-Festereignis „Netzschalter“: zählt jeden Druck, auch den, der den Rechner aus S3 weckt
+export function readPowerButtonCount() {
+    const n = parseInt(readText('/sys/firmware/acpi/interrupts/ff_pwr_btn'), 10);
+    return Number.isNaN(n) ? null : n;
+}
+
 export function diffWakeCounts(before, after) {
     const hits = [];
     for (const [id, cur] of after) {
