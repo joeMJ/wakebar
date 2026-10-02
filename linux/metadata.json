@@ -4,8 +4,8 @@
   "uuid": "wakebar@johnlose.de",
   "shell-version": ["46", "47", "48", "49", "50"],
   "session-modes": ["user", "unlock-dialog"],
-  "version": 2,
-  "version-name": "1.1",
+  "version": 3,
+  "version-name": "1.2",
   "url": "https://github.com/joeMJ/wakebar",
   "settings-schema": "org.gnome.shell.extensions.wakebar"
 }

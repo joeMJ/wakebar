@@ -20,7 +20,7 @@
 
 | Plattform | Status | Verzeichnis | Tech Stack |
 | :--- | :--- | :--- | :--- |
-| **Linux (GNOME Shell)** | v1.1 | [`linux/`](linux/) | GNOME Shell 46–50 ESM, GTK4/Adw, D-Bus (logind, SessionManager), systemd-Journal, libsoup 3 |
+| **Linux (GNOME Shell)** | v1.2 | [`linux/`](linux/) | GNOME Shell 46–50 ESM, GTK4/Adw, D-Bus (logind, SessionManager), systemd-Journal, libsoup 3 |
 
 ---
 
@@ -36,10 +36,12 @@
 * **Popup (bei Klick auf die Ampel):**
   * **Kopf-Kachel:** Rechnername, Gesamtstatus, letzte Prüfung, letzter Aufwecker.
   * **Hält gerade wach:** eine Zeile je Programm mit Status `{blockiert}` / `{bremst}`. Die Sperren stammen von systemd-logind und der GNOME-Sitzung (Browser, Videoplayer, …). Rein systeminterne Sperren, die nur kurz verzögern, sind separat gelistet und färben die Ampel nicht.
-  * **Hielt vom Schlafen ab:** Protokoll früherer Sperren mit Beginn, Ende und Dauer.
-  * **Aufwecker:** Protokoll der Aufwachvorgänge mit Zeitpunkt, Schlafdauer und Ursache: belegt, wenn das System sie meldet (Netzschalter, Deckel, Weck-Zähler), sonst als ausdrücklich gekennzeichnete Vermutung („Tastatur/Maus“). Viele Rechner melden keine Aufweckquelle.
+  * **Hielt vom Schlafen ab:** Protokoll früherer Sperren mit Beginn, Ende und Dauer; kurz aufeinanderfolgende gleiche Sperren sind zu einem Eintrag („Name (N×)“) zusammengefasst.
+  * **Aufwecker:** Protokoll der Aufwachvorgänge mit Zeitpunkt, Schlafdauer und Ursache, ermittelt aus Zählern des Kernels (`/sys/class/wakeup`, ACPI) und dem Journal: `Tastatur/Maus (USB)` (belegt, beide lassen sich nicht trennen), `Netzschalter` bzw. `Netzschalter (per Ausschluss)`, Gehäusedeckel oder – wenn nichts erkennbar ist – eine ausdrücklich gekennzeichnete Vermutung. Im Sidecar stehen die gemessenen Zähler.
   * **Flyover-Sidecar:** Fährt man über eine Zeile, erscheint neben dem Menü ein Detailfenster mit Erklärung, warum das Programm den Rechner wach hält, dem Grund laut Programm, Prozess, Laufzeit und der Bedeutung des Modus.
   * **Wach halten:** schaltet eine eigene Schlafsperre ein und aus.
+
+* **Läuft auch bei gesperrtem Bildschirm** (die Extension wird beim Sperren nicht deaktiviert), damit Schlaf und Aufwachen lückenlos protokolliert werden.
 
 * **Aufbewahrung einstellbar:** „seit letztem Aufwachen“ oder 1, 3, 7, 14 Tage (mit fester Obergrenze). Das Protokoll liegt lokal unter `~/.local/state/wakebar/`.
 
@@ -99,6 +101,16 @@ cd wakebar
 ```
 
 Update mit `./update.sh` (führt `git pull` aus), Deinstallation mit `./uninstall.sh`.
+
+---
+
+## Tests
+
+Der Menüaufbau lässt sich ohne laufende GNOME Shell prüfen (Platzhalter für die Shell-Bausteine, gespeicherte Daten werden gelesen):
+
+```bash
+./tests/run-menu-test.sh
+```
 
 ---
 
