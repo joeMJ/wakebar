@@ -123,9 +123,15 @@ export default class WakeBarExtension extends Extension {
 
     _buildPanel() {
         this._button = new PanelMenu.Button(0.5, 'wakebar', false);
-        const box = new St.BoxLayout({style_class: 'panel-status-menu-box'});
+        // Feste Breite, damit der Wechsel Symbol ↔ farbiger Punkt die Leiste nicht verschiebt (Zero-Jitter)
+        const box = new St.BoxLayout({style_class: 'panel-status-menu-box wakebar-box'});
+        this._idleIcon = new St.Icon({
+            icon_name: 'system-shutdown-symbolic', style_class: 'system-status-icon wakebar-idle-icon',
+            y_align: Clutter.ActorAlign.CENTER,
+        });
         this._dot = new St.Label({text: '●', y_align: Clutter.ActorAlign.CENTER, style_class: 'wakebar-dot wakebar-green'});
         this._count = new St.Label({text: '', y_align: Clutter.ActorAlign.CENTER, style_class: 'wakebar-count'});
+        box.add_child(this._idleIcon);
         box.add_child(this._dot);
         box.add_child(this._count);
         this._button.add_child(box);
@@ -357,6 +363,11 @@ export default class WakeBarExtension extends Extension {
             return;
         const real = this._inhibitors.filter(i => i.who !== OWN_WHO);
         const {state, count} = classify(real, this._keepFd !== null);
+        // Kein Schlafverhinderer: einfarbiges Ein/Aus-Symbol (Kreis mit Strich, Farbe der Leiste); sonst farbige Ampel mit Zähler
+        const idle = state === 'green';
+        this._idleIcon.visible = idle;
+        this._dot.visible = !idle;
+        this._count.visible = !idle;
         this._dot.style_class = `wakebar-dot wakebar-${state}`;
         this._count.text = count > 0 ? String(count) : '';
         this._state = state;

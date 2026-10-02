@@ -27,7 +27,7 @@
 ## Funktionen
 
 * **Ampel in der Statusleiste:**
-  * **Grün** – der Rechner kann schlafen.
+  * **Weißes Ein/Aus-Symbol** (Kreis mit Strich, Farbe der Leiste) – nichts hält den Rechner wach, er kann schlafen.
   * **Gelb** – etwas „grübelt“: nur der automatische Schlaf bzw. die Bildschirm-Abschaltung wird gebremst (z. B. Ton- oder Videowiedergabe im Browser).
   * **Rot** – etwas hält ihn fest: eine blockierende Schlafsperre.
   * **Blau** – „Wach halten“ ist eingeschaltet.

@@ -1,6 +1,8 @@
 /* wakebar – Designstandard (Maintenance-Script/designtemplate): Kacheln, Zeilen, Sidecar */
 
-/* Ampel in der Leiste */
+/* Ampel in der Leiste: feste Breite (Symbol ↔ Punkt+Zähler), kein Wackeln */
+.wakebar-box { min-width: 2.6em; }
+.wakebar-idle-icon { icon-size: 16px; }
 .wakebar-dot { font-size: 1.0em; font-weight: 700; }
 .wakebar-green  { color: #2ec27e; }
 .wakebar-yellow { color: #f5c211; }
