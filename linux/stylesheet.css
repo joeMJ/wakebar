@@ -1,15 +1,33 @@
-/* wakebar – Farben und Karten wie snmpbar (Adwaita-Palette) */
+/* wakebar – Designstandard (Maintenance-Script/designtemplate): Kacheln, Zeilen, Sidecar */
+
+/* Ampel in der Leiste */
 .wakebar-dot { font-size: 1.0em; font-weight: 700; }
 .wakebar-green  { color: #2ec27e; }
 .wakebar-yellow { color: #f5c211; }
 .wakebar-red    { color: #e01b24; }
 .wakebar-blue   { color: #3584e4; }
-.wakebar-count  { font-weight: 500; font-feature-settings: "tnum"; font-variant-numeric: tabular-nums; min-width: 1.2em; }
+.wakebar-count  { font-weight: 500; font-feature-settings: "tnum"; font-variant-numeric: tabular-nums; min-width: 1.2em; margin-left: 2px; }
 
-/* Karten: Rand und Farben setzt extension.js je nach Hell/Dunkel (Designstandard snmpbar) */
-.wakebar-card {
+/* PopupBaseMenuItem braucht padding 0, damit die Kachel mit eigenen Margins sauber sitzt */
+.wakebar-card-item { padding: 0px !important; margin: 0px !important; }
+
+/* Rand und Hintergrund setzt extension.js je Hell/Dunkel per rgba() (8-stellige Hex-Farben ignoriert St) */
+.wakebar-card-box {
+    min-width: 380px;
     margin: 4px 6px;
     padding: 10px 14px;
     border-radius: 8px;
-    min-width: 380px;
+    border-width: 1px;
+    border-style: solid;
 }
+
+.wakebar-interactive-row {
+    transition-duration: 120ms;
+    border-radius: 6px;
+    padding: 3px 6px;
+    margin-top: 2px;
+    margin-bottom: 2px;
+}
+.wakebar-interactive-row:hover { background-color: rgba(128, 128, 128, 0.16); }
+
+.wakebar-sidecar { box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25); }
