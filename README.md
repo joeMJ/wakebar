@@ -20,7 +20,7 @@
 
 | Plattform | Status | Verzeichnis | Tech Stack |
 | :--- | :--- | :--- | :--- |
-| **Linux (GNOME Shell)** | v1.0 | [`linux/`](linux/) | GNOME Shell 46–50 ESM, GTK4/Adw, D-Bus (logind, SessionManager), systemd-Journal, libsoup 3 |
+| **Linux (GNOME Shell)** | v1.1 | [`linux/`](linux/) | GNOME Shell 46–50 ESM, GTK4/Adw, D-Bus (logind, SessionManager), systemd-Journal, libsoup 3 |
 
 ---
 
@@ -37,7 +37,7 @@
   * **Kopf-Kachel:** Rechnername, Gesamtstatus, letzte Prüfung, letzter Aufwecker.
   * **Hält gerade wach:** eine Zeile je Programm mit Status `{blockiert}` / `{bremst}`. Die Sperren stammen von systemd-logind und der GNOME-Sitzung (Browser, Videoplayer, …). Rein systeminterne Sperren, die nur kurz verzögern, sind separat gelistet und färben die Ampel nicht.
   * **Hielt vom Schlafen ab:** Protokoll früherer Sperren mit Beginn, Ende und Dauer.
-  * **Aufwecker:** Protokoll der Aufwachvorgänge mit Zeitpunkt, Schlafdauer und – soweit der Kernel Zähler dafür liefert – der Ursache (z. B. Netzschalter, Deckel).
+  * **Aufwecker:** Protokoll der Aufwachvorgänge mit Zeitpunkt, Schlafdauer und Ursache: belegt, wenn das System sie meldet (Netzschalter, Deckel, Weck-Zähler), sonst als ausdrücklich gekennzeichnete Vermutung („Tastatur/Maus“). Viele Rechner melden keine Aufweckquelle.
   * **Flyover-Sidecar:** Fährt man über eine Zeile, erscheint neben dem Menü ein Detailfenster mit Erklärung, warum das Programm den Rechner wach hält, dem Grund laut Programm, Prozess, Laufzeit und der Bedeutung des Modus.
   * **Wach halten:** schaltet eine eigene Schlafsperre ein und aus.
 
