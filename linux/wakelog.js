@@ -51,7 +51,21 @@ export function readWakeCounts() {
         const count = parseInt(readText(`${base}/event_count`), 10);
         if (!name || Number.isNaN(count))
             continue;
-        out.set(id, {count, label: friendlyLabel(base, name)});
+        // PCI-Klasse der Quelle: 0x0c03xx = USB-Controller (xHCI/EHCI) → hat ein USB-Gerät (Tastatur/Maus) geweckt
+        const pciClass = readText(`${base}/device/class`);
+        let kind = 'other';
+        let label = friendlyLabel(base, name);
+        if (pciClass.startsWith('0x0c03')) {
+            kind = 'usb';
+            label = 'Tastatur/Maus (USB)';
+        } else if (/^LNXPWRBN/.test(name)) {
+            kind = 'button';
+        } else if (/^PNP0C0D/.test(name)) {
+            kind = 'lid';
+        } else if (/^(device:|PNP0C0C|PNP0A08|LNXTHERM|LNXVIDEO|PNP0C0E)/.test(name)) {
+            kind = 'generic';   // zählt bei JEDEM Aufwachen mit (allgemeine ACPI-Meldung), taugt nicht als Ursache
+        }
+        out.set(id, {count, label, kind});
     }
     return out;
 }
@@ -73,6 +87,31 @@ export function describeDiff(before, after, btnBefore, btnAfter) {
 export function readPowerButtonCount() {
     const n = parseInt(readText('/sys/firmware/acpi/interrupts/ff_pwr_btn'), 10);
     return Number.isNaN(n) ? null : n;
+}
+
+// Ursache aus den Zählern: belegt (USB-Controller, Deckel, Netzschalter, sonstige benannte Quelle) oder per Ausschluss
+// (nur allgemeine ACPI-Zähler gestiegen → typisch Netzschalter). Null, wenn sich nichts verändert hat.
+export function classifyWake(before, after, btnBefore, btnAfter) {
+    const changed = [];
+    for (const [id, cur] of after) {
+        const prev = before.get(id);
+        if (prev && cur.count > prev.count)
+            changed.push(cur);
+    }
+    const has = k => changed.some(c => c.kind === k);
+    const btnUp = btnBefore !== null && btnAfter !== null && btnAfter > btnBefore;
+    if (has('usb'))
+        return {source: 'Tastatur/Maus (USB)', inferred: false, reason: 'usb'};
+    if (has('lid'))
+        return {source: 'Gehäusedeckel', inferred: false, reason: 'lid'};
+    if (has('button') || btnUp)
+        return {source: 'Netzschalter', inferred: false, reason: 'button'};
+    const other = [...new Set(changed.filter(c => c.kind === 'other').map(c => c.label))];
+    if (other.length)
+        return {source: other.join(', '), inferred: false, reason: 'other'};
+    if (changed.length)
+        return {source: 'Netzschalter (per Ausschluss)', inferred: true, reason: 'exclusion'};
+    return null;
 }
 
 export function diffWakeCounts(before, after) {

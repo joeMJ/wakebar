@@ -9,7 +9,7 @@ import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 
 import {listInhibitors, classify, isRelevant} from './inhibitors.js';
-import {readWakeCounts, diffWakeCounts, describeDiff, readPowerButtonCount, readSleepCycles, inferWakeCause, ResumeDetector} from './wakelog.js';
+import {readWakeCounts, classifyWake, describeDiff, readPowerButtonCount, readSleepCycles, inferWakeCause, ResumeDetector} from './wakelog.js';
 import {loadStore, saveStore, prune} from './store.js';
 import {explain, processInfo, findPid} from './explain.js';
 import {UpdateChecker} from './updater.js';
@@ -249,31 +249,26 @@ export default class WakeBarExtension extends Extension {
             console.error(`wakebar: Journal nicht lesbar: ${e.message}`);
         }
 
-        const detect = () => {
-            const hits = diffWakeCounts(before, readWakeCounts());
-            const btn = readPowerButtonCount();
-            if (beforeBtn !== null && btn !== null && btn > beforeBtn && !hits.includes('Netzschalter'))
-                hits.push('Netzschalter');
-            return hits;
-        };
-        let sources = detect();
-        if (sources.length === 0) {
+        const detect = () => classifyWake(before, readWakeCounts(), beforeBtn, readPowerButtonCount());
+        let cls = detect();
+        // Zähler laufen unterschiedlich schnell nach: nur eine belegte Ursache gilt sofort, sonst nach 4 s noch einmal messen
+        if (!cls || cls.reason === 'exclusion') {
             await new Promise(resolve => GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, 4, () => {
                 resolve();
                 return GLib.SOURCE_REMOVE;
             }));
-            sources = detect();
+            cls = detect() ?? cls;
         }
         if (!this._store)
             return;
         const evidence = describeDiff(before, readWakeCounts(), beforeBtn, readPowerButtonCount());
-        if (sources.length) {
-            this._addWake({slept, woke, source: sources.join(', '), inferred: false, probed: true, evidence});
+        if (cls) {
+            this._addWake({slept, woke, source: cls.source, inferred: cls.inferred, reason: cls.reason, probed: true, evidence});
         } else {
             const cause = await inferWakeCause(woke).catch(() => ({source: null, inferred: false}));
             if (!this._store)
                 return;
-            this._addWake({slept, woke, source: cause.source, inferred: cause.inferred, probed: true, evidence});
+            this._addWake({slept, woke, source: cause.source, inferred: cause.inferred, reason: cause.inferred ? 'guess' : 'journal', probed: true, evidence});
         }
     }
 
@@ -328,15 +323,14 @@ export default class WakeBarExtension extends Extension {
         const before = new Map(snap.counts);
         const after = readWakeCounts();
         const btn = readPowerButtonCount();
-        const hits = diffWakeCounts(before, after);
-        if (snap.btn !== null && btn !== null && btn > snap.btn && !hits.includes('Netzschalter'))
-            hits.push('Netzschalter');
+        const cls = classifyWake(before, after, snap.btn, btn);
         const w = cands[0];
         w.evidence = describeDiff(before, after, snap.btn, btn);
         w.snapshotBased = true;
-        if (hits.length) {
-            w.source = hits.join(', ');
-            w.inferred = false;
+        if (cls) {
+            w.source = cls.source;
+            w.inferred = cls.inferred;
+            w.reason = cls.reason;
             w.probed = true;
         }
     }
@@ -504,9 +498,7 @@ export default class WakeBarExtension extends Extension {
         const wakeEntry = w => ({
             icon: 'weather-clear-symbolic', title: w.source ?? 'Ursache unbekannt', tag: `{${fmtTime(w.woke)}}`, color: pal.dim,
             lines: [`Geweckt ${fmtTime(w.woke)}`, `Schlief ab ${fmtTime(w.slept)} · ${fmtDuration(w.woke - w.slept)}`],
-            notes: [!w.source ? 'Die Ursache konnte nicht ermittelt werden.'
-                : w.inferred ? 'Vermutung: Der Kernel meldet auf diesem Rechner keine Aufweckquelle. Weder Netzschalter noch Deckel noch ein Zeitgeber wurden erkannt – am wahrscheinlichsten hat ein USB-Eingabegerät (Tastatur oder Maus) geweckt.'
-                    : 'Belegt: das System hat diese Quelle direkt nach dem Aufwachen gemeldet.',
+            notes: [this._wakeNote(w),
                 w.evidence ? `Messwerte (Zähler vor→nach dem Schlaf${w.snapshotBased ? ', Stand beim Deaktivieren' : ''}): ${w.evidence.length ? w.evidence.join('; ') : 'keine Änderung'}` : null],
         });
         for (const w of wl.slice(0, BAR_ROWS)) {
